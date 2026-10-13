@@ -1,0 +1,51 @@
+#!/bin/sh
+set -e
+# Real login users: uid 1000-59999 with an existing home directory
+for_each_user() {
+  getent passwd | while IFS=: read -r user _ uid _ _ home _; do
+    [ "$uid" -ge 1000 ] 2>/dev/null && [ "$uid" -lt 60000 ] || continue
+    [ -d "$home" ] || continue
+    "$@" "$user" "$uid" "$home"
+  done
+}
+
+as_user() {
+  user="$1"; uid="$2"; home="$3"; shift 3
+  runuser -u "$user" -- env -i HOME="$home" USER="$user" PATH=/usr/bin:/bin \
+    XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
+}
+
+# Quit every running Nautilus and start it again in the background (no new window)
+restart_nautilus() {
+  for uid in $(ps -C nautilus -o uid= 2>/dev/null | sort -un); do
+    user="$(id -nu "$uid" 2>/dev/null)" || continue
+    home="$(getent passwd "$user" | cut -d: -f6)"
+    as_user "$user" "$uid" "$home" gdbus call --session --dest org.gnome.Nautilus \
+      --object-path /org/gnome/Nautilus --method org.gtk.Actions.Activate quit '[]' '{}' \
+      >/dev/null 2>&1 || true
+    i=0
+    while pgrep -u "$uid" -x nautilus >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+    pkill -TERM -u "$uid" -x nautilus 2>/dev/null || true
+    sleep 0.5
+    as_user "$user" "$uid" "$home" gdbus call --session --dest org.gnome.Nautilus \
+      --object-path /org/gnome/Nautilus --method org.freedesktop.DBus.Peer.Ping \
+      >/dev/null 2>&1 || true
+    echo "Restarted Files for $user"
+  done
+}
+# Put the original Templates folder back for every user
+restore_user() {
+  user="$1"; uid="$2"; home="$3"
+  dir="$home/.config/nautilus-new-named-document"
+  if [ -f "$dir/templates-dir" ]; then
+    saved="$(cat "$dir/templates-dir")"
+    as_user "$user" "$uid" "$home" xdg-user-dirs-update --set TEMPLATES "$saved" || true
+    echo "Restored Templates folder for $user: $saved"
+  fi
+  rm -rf "$dir"
+}
+
+if [ "$1" = "remove" ]; then
+  for_each_user restore_user
+fi
+exit 0

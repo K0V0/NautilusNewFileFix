@@ -1,0 +1,79 @@
+#!/bin/sh
+# Optional helper. The package switches the menu over automatically; this is only
+# for going back to the built-in Nautilus menu or checking the state.
+# Run as your normal user (not sudo).
+set -e
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nautilus-new-named-document"
+CONF="$CONF_DIR/templates-dir"
+KEEP="$CONF_DIR/keep-builtin"
+
+usage() {
+    echo "Usage: nautilus-new-document replace on|off|status"
+    exit 1
+}
+
+restart_files() {
+    gdbus call --session --dest org.gnome.Nautilus --object-path /org/gnome/Nautilus \
+        --method org.gtk.Actions.Activate quit '[]' '{}' >/dev/null 2>&1 || true
+}
+
+current="$(xdg-user-dir TEMPLATES)"
+current="${current%/}"
+home="${HOME%/}"
+
+# Hide the built-in menu: Nautilus hides it when the XDG Templates folder == $HOME.
+# Our extension keeps reading the real folder saved in $CONF.
+do_on() {
+    [ -f "$CONF" ] && return 0
+    [ "$current" = "$home" ] && return 1
+    [ -d "$current" ] || return 1
+    mkdir -p "$CONF_DIR"
+    printf '%s\n' "$current" > "$CONF"
+    rm -f "$KEEP"
+    xdg-user-dirs-update --set TEMPLATES "$HOME"
+}
+
+case "$1" in
+  auto)
+    # Used by the package and the extension: switch over unless the user opted out
+    [ -f "$KEEP" ] && exit 0
+    do_on || true
+    exit 0
+    ;;
+  replace) ;;
+  *) usage ;;
+esac
+
+[ "$(id -u)" = 0 ] && { echo "Run this as your normal user, without sudo." >&2; exit 1; }
+
+case "$2" in
+  on)
+    if do_on; then
+        echo "Built-in menu hidden. Templates are read from: $(cat "$CONF")"
+        restart_files
+    else
+        echo "No Templates folder to switch over." >&2
+        exit 1
+    fi
+    ;;
+  off)
+    mkdir -p "$CONF_DIR"
+    if [ -f "$CONF" ]; then
+        saved="$(cat "$CONF")"
+        xdg-user-dirs-update --set TEMPLATES "$saved"
+        rm -f "$CONF"
+        echo "Built-in menu restored. Templates folder: $saved"
+    fi
+    touch "$KEEP"
+    restart_files
+    ;;
+  status)
+    if [ -f "$CONF" ]; then
+        echo "Replaced. Templates are read from: $(cat "$CONF")"
+    else
+        echo "Not replaced. Templates folder: $current"
+    fi
+    ;;
+  *) usage ;;
+esac

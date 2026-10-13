@@ -1,0 +1,11 @@
+Package: nautilus-new-named-document
+Version: 1.2.0
+Section: gnome
+Priority: optional
+Architecture: all
+Depends: python3-nautilus (>= 4.0), zenity, xdg-user-dirs, libglib2.0-bin, procps
+Maintainer: Kovo <kovo.mato@gmail.com>
+Description: Nautilus "New Document" menu that asks for the file name
+ Replaces the "New Document" submenu of GNOME Files (Nautilus) with one
+ that asks for the file name before the file is created. Works right
+ after installation; Files is restarted automatically.
